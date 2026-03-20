@@ -81,7 +81,7 @@ POST /submit → server lưu vào SQLite:
 Rebuild FAISS index → faiss.index + id_map.json
 ```
 
-### 2. Điểm danh realtime (chạy 24/7)
+### 2. Điểm danh realtime 
 
 ```
 Camera RTSP 25FPS
