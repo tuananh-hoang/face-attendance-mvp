@@ -1,6 +1,6 @@
-# Face Attendance System
+# Hệ thống điểm danh nhận diện khuôn mặt
 
-> Real-time face recognition attendance system using InsightFace + FastAPI + Telegram notification
+> Nhận diện khuôn mặt realtime từ camera RTSP tại cửa ra vào, tự động ghi nhận giờ vào/ra và gửi thông báo lên nhóm Telegram công ty.
 
 ![Python](https://img.shields.io/badge/Python-3.9-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)
@@ -11,217 +11,219 @@
 
 ## Demo
 
-| Face Registration | Realtime Detection | Telegram Notification |
+| Đăng ký khuôn mặt | Nhận diện realtime | Thông báo Telegram |
 |---|---|---|
 | ![register](docs/register.png) | ![detection](docs/detection.png) | ![telegram](docs/telegram.png) |
 
 ---
 
-## Problem Statement
+## Bài toán
 
-Manual attendance tracking in companies is time-consuming and error-prone. This system automates the process using a fixed RTSP camera at the office entrance — employees are automatically checked in/out when passing through the door, with instant Telegram notifications to a company group.
+Điểm danh thủ công tốn thời gian và hay xảy ra sai sót. Hệ thống này tự động hóa quy trình bằng camera cố định tại cửa ra vào — nhân viên đi qua sẽ được tự động ghi nhận giờ vào/ra, kèm ảnh và thông báo tức thì lên nhóm Telegram của công ty, không cần thao tác gì thêm.
 
 ---
 
-## System Architecture
+## Kiến trúc hệ thống
 
 ```
-┌─────────────────────────┐         ┌──────────────────────────────┐
-│   face_registration     │         │   face-attendance-mvp        │
-│   App (port 8001)       │─SQLite─▶│   App (port 8501)            │
-│   Employee self-enroll  │         │   Realtime RTSP recognition  │
-└─────────────────────────┘         └──────────────────────────────┘
-          │                                       │
-          ▼                                       ▼
-   employees.db                           attendance.db
-   face_embeddings                         attendance_log
-   (512-d ArcFace vectors)                 recognition_events
-                                                  │
-                                                  ▼
-                                          Telegram Group
+┌─────────────────────────┐           ┌──────────────────────────────┐
+│   App đăng ký           │           │   App điểm danh              │
+│   face_registration     │──SQLite──▶│   face-attendance-mvp        │
+│   port 8001             │           │   port 8501                  │
+│   Nhân viên tự chụp ảnh │           │   Nhận diện từ camera RTSP   │
+└─────────────────────────┘           └──────────────────────────────┘
+          │                                         │
+          ▼                                         ▼
+   employees.db                             attendance.db
+   face_embeddings                           attendance_log
+   (512 chiều, ArcFace)                      recognition_events
+                                                    │
+                                                    ▼
+                                            Nhóm Telegram
 ```
 
-### Data Flow
+### Luồng dữ liệu điểm danh
 
 ```
-RTSP Camera (25 FPS)
+Camera RTSP 25FPS
       │
-      ▼ camera_reader() [dedicated thread]
-  latest_frame
+      ▼  [Thread riêng]
+  latest_frame (luôn là frame mới nhất)
       │
-      ▼ gen_frames() [every 40ms]
-  Crop ROI → Resize 640×480
+      ▼  [Mỗi 40ms]
+  Crop vùng ROI → Resize 640x480
       │
-      ▼ InsightFace buffalo_l
-  RetinaFace detect → 5 landmarks
-  ArcFace R50       → 512-d embedding
+      ▼  InsightFace buffalo_l
+  RetinaFace  → phát hiện khuôn mặt + 5 điểm mốc
+  ArcFace R50 → vector đặc trưng 512 chiều
       │
-      ▼ Cosine similarity vs DB
-  score >= 0.45 → name
+      ▼  Cosine similarity với DB
+  score >= 0.45 → tên nhân viên
       │
-      ▼ Consecutive confirmation (K=5 frames)
+      ▼  Xác nhận liên tiếp (5 frame liên tiếp)
   _handle_attendance()
       │
-      ├── First seen today → CHECK-IN  → INSERT attendance_log
-      └── Already checked in → CHECK-OUT → UPDATE attendance_log
+      ├── Lần đầu trong ngày → CHECK-IN  → ghi DB
+      └── Đã check-in rồi   → CHECK-OUT → cập nhật DB
                 │
-                ▼ asyncio.Queue (non-blocking)
-          telegram_worker() → sendPhoto API → Telegram Group
+                ▼  asyncio.Queue (không block pipeline)
+          telegram_worker() → gửi ảnh + thông tin lên Telegram
 ```
 
 ---
 
-## Key Technical Decisions
+## Các quyết định kỹ thuật quan trọng
 
-### 1. Face Recognition Pipeline
-- **Model:** InsightFace `buffalo_l` (RetinaFace detector + ArcFace R50 w600k_r50)
-- **Embedding:** 512-d L2-normalized vector, cosine similarity search
-- **DB search:** Raw embeddings (not mean-pooled) → argmax cosine → better accuracy across poses
-- **Threshold:** `SIM_THRESHOLD=0.45` tuned on internal test set
+### 1. Pipeline nhận diện khuôn mặt
+- **Model:** InsightFace `buffalo_l` — RetinaFace detector + ArcFace R50 (train trên WebFace600K)
+- **Embedding:** Vector 512 chiều, L2-normalize, tìm kiếm bằng cosine similarity
+- **Lưu trữ DB:** Giữ nguyên từng embedding thô (không mean pooling) → argmax cosine → nhận diện đúng hơn khi góc thay đổi
+- **Ngưỡng:** `SIM_THRESHOLD=0.45` được chỉnh trên tập test thực tế
 
-### 2. Head Pose Estimation
-- **Method:** `cv2.solvePnP` with EPnP algorithm on 5 RetinaFace landmarks
-- **Output:** Yaw/Pitch/Roll Euler angles (ZYX convention via Rodrigues decomposition)
-- **Camera calibration:** Pitch offset correction (`+54°` for overhead webcam setup)
-- **Pose classes:** frontal / left / right / up / down → guides user during enrollment
+### 2. Ước lượng góc đầu (Head Pose Estimation)
+- **Thuật toán:** `cv2.solvePnP` với EPnP trên 5 landmarks của RetinaFace
+- **Đầu ra:** Góc Euler Yaw/Pitch/Roll (quy ước ZYX, phân tích từ ma trận Rodrigues)
+- **Vấn đề thực tế:** Pitch offset ~+54° do webcam đặt trên màn hình nhìn xuống → cần hiệu chỉnh offset trước khi phân loại pose
+- **Ứng dụng:** Hướng dẫn nhân viên chụp đủ 5 tư thế khi đăng ký
 
-### 3. Multi-pose Enrollment
-- Captures 11 frames across 5 poses (frontal×5, left×2, right×2, up×1, down×1)
-- Quality check per frame: blur score (Laplacian variance ≥60), brightness (40–220), face ratio
-- Auto-capture when quality + pose both pass
+### 3. Đăng ký khuôn mặt đa tư thế
+- Chụp 11 ảnh: frontal×5, trái×2, phải×2, ngẩng×1, cúi×1
+- Kiểm tra chất lượng mỗi frame: độ nét (Laplacian variance ≥60), độ sáng (40–220), tỉ lệ mặt/frame
+- Tự động chụp khi cả quality lẫn pose đều đạt yêu cầu
 
-### 4. Attendance Logic
-- **Consecutive confirmation:** 5 consecutive recognized frames before triggering event → filters false positives
-- **Check-in:** INSERT OR IGNORE (atomic, once per day)
-- **Check-out:** UPDATE with 5-minute cooldown (last-write-wins pattern)
-- **Threading:** camera thread → sync, Telegram → async via `run_coroutine_threadsafe`
+### 4. Logic điểm danh
+- **Consecutive confirmation:** Cần 5 frame liên tiếp nhận ra cùng 1 người → lọc false positive từ nhiễu detection
+- **Check-in:** `INSERT OR IGNORE` (atomic, mỗi ngày 1 lần duy nhất)
+- **Check-out:** `UPDATE` với cooldown 5 phút (last-write-wins pattern)
+- **Thread safety:** Camera thread (sync) đẩy event vào asyncio queue qua `run_coroutine_threadsafe`
 
-### 5. Storage Design
+### 5. Thiết kế database
 ```
-employees.db    → master data (face_registration app)
-attendance.db   → operational data (attendance app)
+employees.db    → master data (app đăng ký quản lý)
+attendance.db   → dữ liệu vận hành (app điểm danh quản lý)
 
-attendance_log:  1 row per person per day
-  UNIQUE(employee_id, date) constraint
-  → guaranteed single check-in entry
+attendance_log:  1 hàng per người per ngày
+  UNIQUE(employee_id, date) → đảm bảo không trùng check-in
+  check_in  → ghi 1 lần, không đổi
+  check_out → cập nhật liên tục, giá trị cuối = giờ ra thực tế
 
-recognition_events: raw log every recognition
-  → used for threshold tuning, FAR/FRR analysis
+recognition_events: raw log mọi lần nhận diện
+  → dùng để debug, tune threshold, phân tích FAR/FRR
 ```
 
 ---
 
-## Evaluation Results
+## Kết quả đánh giá
 
-Tested on internal dataset (1 employee, 4 scenarios):
+Test trên tập dataset nội bộ (1 nhân viên, 4 kịch bản):
 
-| Scenario | Frames | Prediction | Confidence |
+| Kịch bản | Số frame | Kết quả | Độ tin cậy |
 |---|---|---|---|
-| normal.mp4 | 11 | ✓ correct | 91% |
-| motion.mp4 | 7 | ✓ correct | 71% |
-| head_turn.mp4 | 5 | ✓ correct | 60% |
-| occlusion.mp4 | 4 | ✗ Unknown | 75% |
+| Đi bình thường | 11 | ✓ Đúng | 91% |
+| Đi nhanh | 7 | ✓ Đúng | 71% |
+| Quay đầu | 5 | ✓ Đúng | 60% |
+| Đeo khẩu trang | 4 | ✗ Unknown | 75% |
 
 ```
-Accuracy (event-level) : 3/4 = 75%
-FRR (missed employee)  : 25%  ← occlusion case (mask)
-FAR (false accept)     : N/A  ← no unknown samples yet
+Accuracy (event-level)       : 3/4 = 75%
+FRR (từ chối nhân viên thật) : 25%  ← trường hợp đeo khẩu trang
+FAR (nhận nhầm người lạ)     : 0%   ← chưa có dữ liệu unknown
 ```
 
-Occlusion failure root cause: ArcFace R50 not trained on masked faces → embedding drifts from prototype vector. Fix: add masked enrollment samples.
+**Phân tích lỗi occlusion:** ArcFace R50 không được train trên ảnh có che mặt → embedding lệch xa prototype vector khi đeo khẩu trang. Giải pháp: thêm ảnh đăng ký khi đeo khẩu trang vào DB.
 
 ---
 
-## Tech Stack
+## Tech stack
 
-| Component | Technology |
+| Thành phần | Công nghệ |
 |---|---|
-| Face detection | RetinaFace (InsightFace buffalo_l) |
-| Face recognition | ArcFace R50, trained on WebFace600K |
-| Pose estimation | OpenCV solvePnP (EPnP) |
+| Phát hiện khuôn mặt | RetinaFace (InsightFace buffalo_l) |
+| Nhận diện khuôn mặt | ArcFace R50, train trên WebFace600K |
+| Ước lượng góc đầu | OpenCV solvePnP (EPnP algorithm) |
 | Backend | FastAPI + Uvicorn |
 | Database | SQLite (WAL mode) |
 | Async messaging | asyncio.Queue + aiohttp |
-| Notification | Telegram Bot API (sendPhoto) |
+| Thông báo | Telegram Bot API (sendPhoto) |
 | Camera | OpenCV VideoCapture (RTSP/FFMPEG) |
 | ML Runtime | ONNX Runtime (CUDA) |
 
 ---
 
-## Project Structure
+## Cấu trúc project
 
 ```
 face-attendance-mvp/
-├── main.py                       # FastAPI app — entry point
+├── main.py                        # FastAPI app — điểm vào chính
 ├── attendance_system/
-│   ├── attendance_db.py          # SQLite schema + CRUD
-│   ├── attendance_service.py     # check-in/check-out business logic
-│   └── telegram_notifier.py     # async Telegram worker
-├── ARCHITECTURE.md               # detailed system design
-└── .env.example                  # environment variables template
+│   ├── attendance_db.py           # SQLite schema + CRUD
+│   ├── attendance_service.py      # Logic check-in/check-out
+│   └── telegram_notifier.py      # Async Telegram worker
+├── ARCHITECTURE.md                # Thiết kế hệ thống chi tiết
+└── .env.example                   # Mẫu biến môi trường
 
 face_registration/
-├── main.py                       # enrollment FastAPI app
-├── pipeline.py                   # detect + pose + quality + embed
-├── database.py                   # SQLite + FAISS operations
-└── static/register.html         # self-enrollment web UI
+├── main.py                        # App đăng ký khuôn mặt
+├── pipeline.py                    # Detect + pose + quality + embed
+├── database.py                    # SQLite + FAISS
+└── static/register.html          # Giao diện đăng ký
 ```
 
 ---
 
-## Setup & Run
+## Cài đặt và chạy
 
 ```bash
-# 1. Install dependencies
+# 1. Cài dependencies
 pip install fastapi uvicorn insightface opencv-python aiohttp scipy
 
-# 2. Configure environment
+# 2. Cấu hình môi trường
 cp .env.example .env
-# Edit .env: RTSP_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Chỉnh .env: RTSP_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-# 3. Enroll employees (face_registration app)
+# 3. Đăng ký khuôn mặt nhân viên
 cd face_registration && python main.py
-# Open http://localhost:8001/register
+# Mở http://localhost:8001/register
 
-# 4. Run attendance system
+# 4. Chạy hệ thống điểm danh
 cd face-attendance-mvp
 source .env && python main.py
-# Open http://localhost:8501/video
+# Mở http://localhost:8501/video
 ```
 
 ---
 
-## Environment Variables
+## Biến môi trường
 
-| Variable | Description |
-|---|---|
-| `RTSP_URL` | Camera RTSP stream URL |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Target group chat ID (negative number) |
-| `SIM_THRESHOLD` | Cosine similarity threshold (default: 0.45) |
-| `DET_THRESHOLD` | Detection confidence threshold (default: 0.6) |
-| `CHECKOUT_COOLDOWN` | Seconds between checkout updates (default: 300) |
-
----
-
-## API Reference
-
-```
-GET  /video              MJPEG stream with face detection overlay
-GET  /roi/select         Web UI for ROI selection
-GET  /attendance/today   Today's attendance records (JSON)
-GET  /attendance/{date}  Attendance by date yyyy-mm-dd
-GET  /health             System health check
-POST /reload             Reload face embeddings from DB
-```
+| Biến | Mô tả | Mặc định |
+|---|---|---|
+| `RTSP_URL` | URL camera RTSP | — |
+| `TELEGRAM_BOT_TOKEN` | Token bot từ @BotFather | — |
+| `TELEGRAM_CHAT_ID` | ID nhóm Telegram (số âm) | — |
+| `SIM_THRESHOLD` | Ngưỡng cosine similarity | 0.45 |
+| `DET_THRESHOLD` | Ngưỡng detection confidence | 0.6 |
+| `CHECKOUT_COOLDOWN` | Giây giữa 2 lần cập nhật check-out | 300 |
 
 ---
 
-## What I Learned
+## API
 
-- End-to-end computer vision pipeline from camera stream to database
-- `solvePnP` for head pose estimation — 2D→3D inverse projection problem
-- Production ML considerations: threshold tuning, FAR/FRR tradeoff, embedding drift
-- Real-time system design: threading model, asyncio queue, latency vs throughput
-- SQLite design patterns: atomic INSERT OR IGNORE, WAL mode, FOREIGN KEY constraints
-- Async/sync boundary: `run_coroutine_threadsafe` for cross-thread asyncio communication
+```
+GET  /video               MJPEG stream nhận diện realtime
+GET  /roi/select          Giao diện chọn vùng ROI
+GET  /attendance/today    Danh sách điểm danh hôm nay (JSON)
+GET  /attendance/{date}   Điểm danh theo ngày (yyyy-mm-dd)
+GET  /health              Trạng thái hệ thống
+POST /reload              Reload embeddings từ DB
+```
+
+---
+
+## Những gì học được qua dự án này
+
+- Xây dựng pipeline computer vision end-to-end: từ camera stream → detection → recognition → database → notification
+- Bài toán Head Pose Estimation — inverse projection 2D→3D với `solvePnP`, xử lý gimbal lock và camera offset thực tế
+- Production ML considerations: threshold tuning, FAR/FRR tradeoff, embedding drift khi điều kiện thay đổi
+- Real-time system design: threading model, asyncio queue, cân bằng latency/throughput (camera 25FPS vs recognition 10FPS)
+- SQLite design patterns: atomic INSERT OR IGNORE, WAL mode, FOREIGN KEY constraints, index optimization
+- Async/sync boundary: `run_coroutine_threadsafe` để giao tiếp an toàn giữa camera thread và asyncio event loop
