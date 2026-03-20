@@ -263,10 +263,12 @@ def _handle_attendance(name: str, score: float, frame, bbox):
     import threading
     from attendance_db      import has_checkin_today, record_checkin, record_checkout, log_recognition_event
     from attendance_service import save_photo, _push_notify
-    from datetime import datetime, date
+    from datetime import datetime, date, timezone, timedelta
+
+    VN_TZ = timezone(timedelta(hours=7))  # UTC+7
     import sqlite3 as _sq3
 
-    now   = datetime.now()
+    now   = datetime.now(VN_TZ)
     today = now.date().isoformat()
 
     # Lấy employee_id từ employees.db

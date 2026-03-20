@@ -14,7 +14,9 @@ Flow:
 import os
 import asyncio
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+VN_TZ = timezone(timedelta(hours=7))  # UTC+7
 from typing import Optional
 
 import cv2
@@ -87,7 +89,7 @@ def save_photo(frame: np.ndarray, employee_id: str, event_type: str) -> str:
     Trả về đường dẫn tương đối.
     """
     today     = date.today().isoformat()
-    ts        = datetime.now().strftime("%H%M%S")
+    ts        = datetime.now(VN_TZ).strftime("%H%M%S")
     save_dir  = os.path.join(PHOTOS_DIR, today)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -180,7 +182,7 @@ def _process_event(
     """
     Quyết định check_in hay check_out, ghi DB, lưu ảnh, push notify.
     """
-    now   = datetime.now()
+    now   = datetime.now(VN_TZ)
     today = now.date().isoformat()
 
     with _state_lock:

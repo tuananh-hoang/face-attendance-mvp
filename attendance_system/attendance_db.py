@@ -10,7 +10,9 @@ SQLite schema và CRUD operations cho hệ thống điểm danh.
 
 import os
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+VN_TZ = timezone(timedelta(hours=7))
 from typing import Optional
 from contextlib import contextmanager
 
@@ -145,7 +147,7 @@ def record_checkin(
     Trả về True nếu ghi thành công, False nếu đã check-in rồi.
     """
     if timestamp is None:
-        timestamp = datetime.now()
+        timestamp = datetime.now(VN_TZ)
     today = timestamp.date().isoformat()
     ts    = timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -180,7 +182,7 @@ def record_checkout(
     Cập nhật check-out. Luôn update (last-write wins).
     """
     if timestamp is None:
-        timestamp = datetime.now()
+        timestamp = datetime.now(VN_TZ)
     today = timestamp.date().isoformat()
     ts    = timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -217,7 +219,7 @@ def log_recognition_event(
     timestamp   : datetime = None,
 ):
     if timestamp is None:
-        timestamp = datetime.now()
+        timestamp = datetime.now(VN_TZ)
     ts = timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")
 
     with get_conn() as conn:
