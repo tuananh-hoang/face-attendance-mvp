@@ -1,0 +1,20 @@
+# Credentials
+.env
+
+# Data
+data/
+dataset_test/
+roi.npy
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Model cache
+~/.insightface/
+
+# Ảnh và video
+*.jpg
+*.mp4
