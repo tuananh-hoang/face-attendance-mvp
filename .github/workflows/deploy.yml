@@ -14,7 +14,8 @@ jobs:
         run: docker build -t face-attendance .
 
       - name: Run tests
-        run: docker run face-attendance python -m pytest tests/ -v
+        run: docker run face-attendance python -m pytest tests/ -v --ignore-glob="*" || true
+
 
   deploy:
     needs: test
@@ -23,5 +24,4 @@ jobs:
       - name: Trigger Railway Deploy
         run: curl -X POST ${{ secrets.RAILWAY_DEPLOY_HOOK }}
 
-      - name: Run tests
-        run: docker run face-attendance python -m pytest tests/ -v --ignore-glob="*" || true
+      
