@@ -20,8 +20,5 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Railway Deploy
-        run: curl -X POST ${{ secrets.RAILWAY_DEPLOY_HOOK }}
 
       
