@@ -1,12 +1,11 @@
 FROM python:3.10-slim
 
-# Cần thiết cho opencv
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
+    libgl1 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
-    libgl1-mesa-glx \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
