@@ -22,3 +22,11 @@ jobs:
         run: railway up --detach --service face-attendance
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Verify token via API
+        run: |
+          curl -s -X POST https://backboard.railway.app/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"{ me { name email } }"}' 
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
