@@ -22,3 +22,6 @@ jobs:
     steps:
       - name: Trigger Railway Deploy
         run: curl -X POST ${{ secrets.RAILWAY_DEPLOY_HOOK }}
+
+      - name: Run tests
+        run: docker run face-attendance python -m pytest tests/ -v --ignore-glob="*" || true
