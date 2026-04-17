@@ -1,28 +1,24 @@
-name: Deploy to Railway
+name: CI/CD
 
 on:
   push:
     branches: [main]
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Railway CLI
-        run: npm i -g @railway/cli
+      - name: Build Docker image
+        run: docker build -t face-attendance .
 
-      - name: Verify token via API
-        run: |
-          curl -s -X POST https://backboard.railway.app/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"query":"{ me { name email } }"}'
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Run tests
+        run: docker run face-attendance python -m pytest tests/ -v
 
-      - name: Deploy
-        run: railway up --detach --service face-attendance
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Railway Deploy
+        run: curl -X POST ${{ secrets.RAILWAY_DEPLOY_HOOK }}
