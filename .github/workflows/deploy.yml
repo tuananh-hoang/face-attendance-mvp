@@ -10,8 +10,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Railway
-        uses: railwayapp/railway-github-action@v1
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          service: face-attendance
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Check token
+        run: echo "Token length:${#RAILWAY_TOKEN}"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy
+        run: railway up --detach --service face-attendance
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
