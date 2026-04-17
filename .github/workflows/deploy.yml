@@ -14,12 +14,4 @@ jobs:
         run: docker build -t face-attendance .
 
       - name: Run tests
-        run: docker run face-attendance python -m pytest tests/ -v --ignore-glob="*" || true
-
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-     
-      
+        run: docker run face-attendance python -m pytest tests/ -v
